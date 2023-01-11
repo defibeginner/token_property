@@ -1,0 +1,6 @@
+/results
+/test
+/.idea
+.DS_Store
+*.log
+*.txt
