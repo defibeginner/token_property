@@ -1,0 +1,7 @@
+{
+    "PathLog": "results",
+    "RpcUrl": "http://localhost:8545",
+    "TransferCost": {
+        "NumBlocks": 50400
+    }
+}
