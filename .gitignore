@@ -1,6 +1,8 @@
 /results
 /test
+/reports
 /.idea
 .DS_Store
 *.log
 *.txt
+*.csv

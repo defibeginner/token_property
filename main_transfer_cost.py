@@ -83,7 +83,7 @@ class TransferCostDetector(object):
                 raise NotADirectoryError(f'invalid dir {path_log}')
             _logger = AsyncLogger(path=path_log,
                                   prefix=f'transfer_cost',
-                                  namespace='TransferCost')
+                                  namespace='TC')
             _logger.file_name = os.path.join(path_log, f'transfer_cost_{self.day}.log')
             _logger.start_log()
             return _logger
@@ -116,8 +116,8 @@ class TransferCostDetector(object):
             # status = 1: confirmed
 
             chain_id = trx.get('chainId', np.nan)
-            # from_address = trx['from']
-            # to_address = trx['to']
+            from_address = trx['from']
+            to_address = trx['to']
             gas_price_wei = trx['gasPrice']
 
             # maxFeePerGas: maximum total fee (base fee + priority fee) the sender is willing to pay per gas
@@ -159,14 +159,14 @@ class TransferCostDetector(object):
                                      'transfer_token': transfer_token, 'amount_wei': amount})
 
             transfer = {'txid': txid, 'block_id': block_id, 'chain_id': chain_id, 'status': 'confirmed',
-                        'trans_type': trans_type,
+                        'trans_type': trans_type, 'from': from_address, 'to': to_address,
                         'gas_price_wei': gas_price_wei, 'gas_fee_base_wei': gas_fee_base_wei,
                         'gas_fee_max_wei': gas_fee_max_wei, 'gas_fee_max_priority_wei': gas_fee_max_priority_wei,
                         'gas_limit': gas_limit, 'gas_used': gas_used,
                         'burnt_wei': burnt_wei, 'transaction_fee_wei': transaction_fee_wei, 'logs': logs_summary,
                         'error': None}
 
-            print('{}: {}, {}'.format(pd.Timestamp.now(), block_id, txid))
+            print('{}: {}, {}'.format(pd.to_datetime(block['timestamp'] * 1e9), block_id, txid))
             self._logger.info(json.dumps(transfer))
             return
 
