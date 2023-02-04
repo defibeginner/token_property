@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-main script of pricing api
+main script of trans gas
 """
 
 import os
@@ -38,12 +38,16 @@ class TransferCostDetector(object):
 
     def __init__(self, _config_file: str, day: str):
         config = self.__load_config(_config_file)
+        if 'TransferCost' not in config:
+            raise KeyError('TransferCost is not in config')
+        cfg = config['TransferCost']
+
         self.day = day
 
         # ---------- init logger --------------------
-        if 'PathLog' not in config:
+        if 'PathLog' not in cfg:
             raise KeyError('PathLog is not in config')
-        self._logger = self.__set_logger(config['PathLog'])
+        self._logger = self.__set_logger(cfg['PathLog'])
 
         # ---------- init w3 object --------------------
         if 'RpcUrl' not in config:
@@ -58,9 +62,6 @@ class TransferCostDetector(object):
         self.pool_contract = self._w3.eth.contract(address=pool_address, abi=self._erc20_abi)
 
         # ---------- init w3 object --------------------
-        if 'TransferCost' not in config:
-            raise KeyError('TransferCost is not in config')
-        cfg = config['TransferCost']
         self._num_blocks = cfg.get('NumBlocks', 1)
 
     @staticmethod

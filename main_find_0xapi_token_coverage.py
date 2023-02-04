@@ -137,14 +137,14 @@ if __name__ == '__main__':
 
     df = pd.read_csv(filename)
 
-    addresses = set()
+    addresses = list()
     for i in range(len(df)):
         add1, add2 = df.pair_address.iloc[i].split('-')
         # sym1, sym2 = df.pair.iloc[i].split('-')
         if add1 not in addresses:
-            addresses.add(add1)
+            addresses.append(add1)
         if add2 not in addresses:
-            addresses.add(add2)
+            addresses.append(add2)
 
     d = TokenDetect()
     # print(d.get_token_with_address('0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2'))

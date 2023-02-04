@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-main script of pricing api
+main script of trans gas
 """
 
 import os
