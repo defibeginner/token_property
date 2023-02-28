@@ -15,4 +15,14 @@
    (with the `find_avg_cost()` uncommented)
 4. results are in `results/trans_cost/`
 
+### permit
+
+1. run `main_permit_v3.py`
+2. run `process_permit.py`
+
+
+### fee-on-transfer
+
+1. run `main_fee_on_transfer_v2.py`
+2. run `process_fee_on_transfer.py`
 

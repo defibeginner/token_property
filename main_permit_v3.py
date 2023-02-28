@@ -2,6 +2,9 @@
 
 """
 main script of permit
+
+v3: domain is added
+
 """
 
 import os
@@ -28,6 +31,7 @@ from eip712_structs import make_domain
 from eip712_structs import EIP712Struct, String, Uint, Address
 
 from sklearn.model_selection import ParameterGrid
+from utils import get_domain_separator, get_domain_by_guess, get_domain_in_source_code
 
 __author__ = "yun"
 __copyright__ = ""
@@ -59,14 +63,15 @@ def find_function_in_source_code(source_code, function_name):
     :param function_name:
     :return:
     """
-    # i = source_code.find(f'function {function_name}(')
-    for m in re.finditer(f'function {function_name}', source_code):
+    source_code_lower = source_code.lower()
+    # i = source_code_lower.find(f'function {function_name}(')
+    for m in re.finditer(f'function {function_name}', source_code_lower):
         left = m.start()
-        right = source_code[left:].find(';')
+        right = source_code_lower[left:].find(';')
         if right == -1:
             continue
-        left_bracket = source_code[left:left+right].find('{')
-        # right_bracket = source_code[i:i+j].find('}')
+        left_bracket = source_code_lower[left:left+right].find('{')
+        # right_bracket = source_code_lower[i:i+j].find('}')
         #
         if left_bracket != -1:
             return True
@@ -74,13 +79,14 @@ def find_function_in_source_code(source_code, function_name):
 
 
 def find_implementation_slot(source_code, known_name):
-    for m in re.finditer(known_name, source_code):
+    source_code_lower = source_code.lower()
+    for m in re.finditer(known_name, source_code_lower):
         left = m.start()
         if left != -1:
-            j = source_code[left:].find(';')
-            k = source_code[left:left+j].find('0x')
+            j = source_code_lower[left:].find(';')
+            k = source_code_lower[left:left+j].find('0x')
             if j != -1 and k != -1:
-                implementation_slot = source_code[left + k:left + j]
+                implementation_slot = source_code_lower[left + k:left + j]
                 return implementation_slot
     return ''
 
@@ -105,61 +111,30 @@ def find_permit_type(source_code):
     :param source_code:
     :return:
     """
+    source_code_lower = source_code.lower()
     # i = source_code.find(f'function {function_name}(')
-    for m in re.finditer('function permit', source_code):
+    for m in re.finditer('function permit', source_code_lower):
         left = m.start()
-        right = source_code[left:].find(';')
+        right = source_code_lower[left:].find(';')
         if right == -1:
             continue
-        left_bracket = source_code[left:left+right].find('{')
-        # right_bracket = source_code[i:i+j].find('}')
+        left_bracket = source_code_lower[left:left+right].find('{')
+        # right_bracket = source_code_lower[i:i+j].find('}')
         if left_bracket == -1:
             continue
         # is a permit token
-        func_declare = source_code[left:left+right]
+        func_declare = source_code_lower[left:left+right]
         if 'bool ' in func_declare:
             return 'DAI'
-        if find_function_in_source_code(source_code, 'nonces') and \
-                find_function_in_source_code(source_code, 'domain_separator'):
+        if find_function_in_source_code(source_code_lower, 'nonces') and \
+                find_function_in_source_code(source_code_lower, 'domain_separator'):
             return 'UniV2_Standard'
         else:
             return 'UniV2_NonStandard'
     return 'NotPermit'
 
 
-def get_domain_separator(w3, token_address, abi):
-    try:
-        # func_names = ['DOMAIN_SEPARATOR', 'EIP712_DOMAIN_SEPARATOR', 'getDomainSeperator',
-        #               'domainSeparator', '_domainSeparatorV4']
-        contract = w3.eth.contract(address=Web3.toChecksumAddress(token_address), abi=abi)
-        if 'DOMAIN_SEPARATOR' in abi:
-            dom_sep_bytes = contract.functions.DOMAIN_SEPARATOR().call()
-        elif 'EIP712_DOMAIN_SEPARATOR' in abi:
-            dom_sep_bytes = contract.functions.EIP712_DOMAIN_SEPARATOR().call()
-        elif 'getDomainSeperator' in abi:
-            dom_sep_bytes = contract.functions.getDomainSeperator().call()
-        elif 'domainSeparator' in abi:
-            dom_sep_bytes = contract.functions.domainSeparator().call()
-        elif 'domainSeparatorV4' in abi:
-            dom_sep_bytes = contract.functions.domainSeparatorV4().call()
-        else:
-            dom_sep_bytes = b''
-        # dom_sep_str = Web3.toHex(dom_sep_bytes)
-        return dom_sep_bytes, None
-    except (Exception,) as e:
-        return None, e
-
-
-# define a struct type
-# reference: https://medium.com/treum_io/introducing-eip-712-structs-in-python-27eac7f38281
-class EIP712Domain(EIP712Struct):
-    name = String()
-    version = String()
-    chainId = Uint(256)
-    verifyingContract = Address()
-
-
-def get_domain(w3, token_address, abi):
+def get_domain(w3, token_address, source_code, abi):
     """
     reference for signing data
     https://docs.metamask.io/guide/signing-data.html#signtypeddata-v4
@@ -171,37 +146,25 @@ def get_domain(w3, token_address, abi):
     """
     try:
         dom_sep_bytes, e = get_domain_separator(w3, token_address, abi)
-        if e is not None:
-            raise e
+
+        if e is not None or dom_sep_bytes == b'' or dom_sep_bytes == bytearray(32):
+            # find domain from source code
+            domain_param, dom_sep_bytes, e = get_domain_in_source_code(w3, token_address, source_code, abi)
+            if e is not None:
+                raise e
+        else:
+            domain_param, e = get_domain_by_guess(w3, token_address, abi, dom_sep_bytes)
+            if e is not None:
+                raise e
+            if domain_param is None:
+                # try to find domain from source code
+                guessed_domain_param, guessed_dom_sep_bytes, e = \
+                    get_domain_in_source_code(w3, token_address, source_code, abi)
+                if guessed_dom_sep_bytes == dom_sep_bytes:
+                    domain_param = guessed_domain_param
+
         dom_sep_str = Web3.toHex(dom_sep_bytes)
-
-        known_versions = [None, '1', '1.0', '1.0.0', '2', '2.0', '2.0.0']
-        # https: // chainlist.org /
-        # known_chain_ids = {1: 'Ethereum Mainnet',
-        #                    137: 'Polygon Mainnet',
-        #                    42161: 'Arbitrum'}
-        known_chain_ids = [None, 1]
-
-        contract = w3.eth.contract(address=Web3.toChecksumAddress(token_address), abi=abi)
-        # symbol = contract.functions.symbol().call()
-        # TODO: OverflowError when it is used for MKR token
-        name = contract.functions.name().call()
-        # decimal = contract.functions.decimals().call()  # token decimal
-        known_names = [None, name]
-        known_contracts = [None, token_address]
-
-        # create an instance of the struct type
-        param_grid = {'name': known_names, 'version': known_versions,
-                      'chainId': known_chain_ids, 'verifyingContract': known_contracts}
-        for param in ParameterGrid(param_grid):
-            param_trim = {k: v for k, v in param.items() if v is not None}
-            if param_trim:
-                # Make a Domain Separator
-                domain = make_domain(**param_trim)
-                guessed_hash = domain.hash_struct()
-                if guessed_hash == dom_sep_bytes:
-                    return dom_sep_str, param_trim, None
-        return dom_sep_str, None, Exception('domain not found')
+        return dom_sep_str, domain_param, None
 
     except (Exception,) as e:
         return None, None, e
@@ -294,7 +257,7 @@ class PermitDetector(object):
                 raise Exception('failed to get source code')
             if 'ABI' not in data['result'][0]:
                 raise Exception('failed to get ABI')
-            source_code = data['result'][0]['SourceCode'].lower()
+            source_code = data['result'][0]['SourceCode']
             abi = data['result'][0]['ABI']
             # abi_json = json.loads(abi)
             constructor_argument = data['result'][0]['ConstructorArguments'].lower()
@@ -393,12 +356,12 @@ class PermitDetector(object):
                 return True
         return False
 
-    def _find_domain(self, token_address, abi, is_permit):
+    def _find_domain(self, token_address, abi, source_code, is_permit):
         try:
             if not is_permit:
                 return None, None, None
 
-            dom_sep, domain, e = get_domain(self.w3, token_address, abi)
+            dom_sep, domain, e = get_domain(self.w3, token_address, source_code, abi)
             if e is not None:
                 raise e
 
@@ -420,11 +383,11 @@ class PermitDetector(object):
             # is permit only requires that permit function is found
             is_permit = found_permit_func
 
-            dom_sep, domain, e = self._find_domain(token_address, abi, is_permit)
-            if e is not None:
-                raise e
-
             permit_type = find_permit_type(source_code)
+
+            dom_sep, domain, e = self._find_domain(token_address, abi, source_code, is_permit)
+            # if e is not None:
+            #     raise e
 
             res = {
                 "permit_in_abi": found_permit_in_abi,
@@ -435,8 +398,8 @@ class PermitDetector(object):
                 "found_domain_separator": found_domain_sep,
                 "found_domain_separator_func": found_domain_sep_func,
                 "is_permit": is_permit,
-                "domain_separator": dom_sep,
                 'permit_type': permit_type,
+                "domain_separator": dom_sep,
                 'domain': domain,
             }
             return res, None
@@ -468,7 +431,8 @@ class PermitDetector(object):
             if impl_contract == '':
                 res, e = self._find_permit(token_address, source_code, abi)
             else:
-                res, e = self._find_permit(impl_contract, source_code_impl, abi_impl)
+                # STILL use token_address instead of impl_address
+                res, e = self._find_permit(token_address, source_code_impl, abi_impl)
             if e is not None:
                 raise e
 
@@ -531,39 +495,91 @@ def test():
 
     p.identify_permit('LUSD', '0x5f98805a4e8be255a32880fdec7f6728c6568ba0')
 
-    token_address = '0x5f98805a4e8be255a32880fdec7f6728c6568ba0'
+    res = p.identify_permit('FRAX', '0x853d955acef822db058eb8505911ed77f175b99e')
+    res = p.identify_permit('cbETH', '0xbe9895146f7af43049ca1c1ae358b0541ea49704')
+    res = p.identify_permit('AAVE', '0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9')
+    pp.pprint(res)
+
+    res = p.identify_permit('USDC', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48')
+    pp.pprint(res)
+    res = p.identify_permit('UNI', '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984')
+    pp.pprint(res)
+    res = p.identify_permit('FRAX', '0x853d955acef822db058eb8505911ed77f175b99e')
+    pp.pprint(res)
+    res = p.identify_permit('GRT', '0xc944E90C64B2c07662A292be6244BDf05Cda44a7')
+    pp.pprint(res)
+    res = p.identify_permit('ALI', '0x6b0b3a982b4634ac68dd83a4dbf02311ce324181')
+    pp.pprint(res)
+    res = p.identify_permit('FOLD', '0xd084944d3c05cd115c09d072b9f44ba3e0e45921')
+    pp.pprint(res)
+    res = p.identify_permit('JPEG', '0xe80c0cd204d654cebe8dd64a4857cab6be8345a3')
+    pp.pprint(res)
+    res = p.identify_permit('PREMIA', '0x6399c842dd2be3de30bf99bc7d1bbf6fa3650e70')
+    pp.pprint(res)
+    res = p.identify_permit('wNXM', '0x0d438f3b5175bebc262bf23753c1e53d03432bde')
+    pp.pprint(res)
+    res = p.identify_permit('ANT', '0xa117000000f279d81a1d3cc75430faa017fa5a2e')
+    pp.pprint(res)
+    res = p.identify_permit('ROUTE', '0x16eccfdbb4ee1a85a33f3a9b21175cd7ae753db4')
+    pp.pprint(res)
+    res = p.identify_permit('HEZ', '0xeef9f339514298c6a857efcfc1a762af84438dee')
+    pp.pprint(res)
+
+    p.stop()
 
 
 if __name__ == '__main__':
-    x = pd.read_csv('configs/token_list_0xapi_eth.csv')
-    token_list = x[['symbol', 'address']].copy()
+    # -------------------- option 1 ----------------------------------------
+    x = pd.read_csv('configs/token_registry_202302171614.csv')
+    df = x[['symbol', 'address']].copy()
+    df['symbol'] = [str(x.symbol.iloc[i]) for i in range(len(x))]
 
     x = pd.read_csv('configs/token_list_0xapi_eth.csv')
-    token_list = x[['symbol', 'address']].copy()
+    for i in range(len(x)):
+        t = x.address.iloc[i].lower()
+        sym = x.symbol.iloc[i]
+        if (df.address == t).any():
+            continue
+        df.loc[len(df)] = [sym, t]
 
     # get the list of 1inch
     df_1inch = pd.read_csv('configs/1inch_permit_tokens_eth.csv')
     for i in range(len(df_1inch)):
         t = df_1inch.address.iloc[i].lower()
-        if (token_list.address == t).any():
+        if (df.address == t).any():
             continue
-        token_list.loc[len(token_list)] = ['', t]
+        df.loc[len(df)] = ['', t]
 
-    n_tokens = len(token_list)
+    n_tokens = len(df)
+
+    # -------------------- option 2 ----------------------------------------
+    # filename = 'results/permit/permit_9_crosscheck.csv'
+    # df = pd.read_csv(filename)
+    # n_tokens = len(df)
+
+    # --------------------------------------------------------------------------------
 
     p = PermitDetector('configs/test_config.json')
 
     for i in range(n_tokens):
-        symbol, address = token_list.iloc[i]
-        result = p.identify_permit(symbol, address)
-        if result.get('is_permit', False):
-            print(i,
-                  result['symbol'],
-                  result.get('is_permit', -1),
-                  result.get('domain_separator', -1),
-                  result.get('permit_type', -1),
-                  result['error'])
-        time.sleep(0.3)
+        # if df.iloc[i].is_permit_from_our_result is True or df.iloc[i].is_permit_from_1inch is True:
+        if True:
+
+            # symbol, address = token_list.iloc[i]
+            symbol = df.iloc[i].symbol
+            address = df.iloc[i].address
+
+            result = p.identify_permit(symbol, address)
+
+            if result.get('is_permit', False):
+                print(f'{i}/{n_tokens}',
+                      result['symbol'],
+                      result.get('is_permit', -1),
+                      result.get('domain_separator', -1),
+                      result.get('permit_type', -1),
+                      result.get('domain', -1),
+                      result['error'])
+            time.sleep(0.1)
 
     time.sleep(5)
     p.stop()
